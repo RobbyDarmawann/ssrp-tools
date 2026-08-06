@@ -3,8 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Draggable from "react-draggable";
 import { toPng } from "html-to-image";
-import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1, Move, ZoomIn, Eye, EyeOff, ZoomOut, Maximize } from "lucide-react";
-
+import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1, Move, Eye, EyeOff, ZoomIn as ZoomInIcon, ZoomOut as ZoomOutIcon, Crop, ChevronDown, ChevronRight } from "lucide-react";
 type LineType = 'chat' | 'me' | 'do' | 'ooc' | 'radio' | 'low';
 
 type ChatLine = {
@@ -22,6 +21,7 @@ type TextGroup = {
   y: number; 
 };
 
+// --- KAMUS BAHASA ---
 const dict = {
   id: {
     title: "SSRP Studio",
@@ -83,14 +83,20 @@ const getDefaultColor = (type: LineType) => {
   }
 };
 
-// Menambahkan properti scale agar mouse drag akurat saat workspace di-zoom
-const DraggableText = ({ group, onDrag, scale }: { group: TextGroup; onDrag: (id: string, x: number, y: number) => void; scale: number; }) => {
+// --- DRAGGABLE TEXT (Dengan fitur Hover Indicator UX) ---
+const DraggableText = ({ group, index, onDrag, scale }: { group: TextGroup; index: number; onDrag: (id: string, x: number, y: number) => void; scale: number; }) => {
   const nodeRef = useRef<HTMLDivElement>(null);
   const sampTextShadow = "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000";
 
   return (
     <Draggable nodeRef={nodeRef} bounds="parent" position={{ x: group.x, y: group.y }} scale={scale} onDrag={(e, data) => onDrag(group.id, data.x, data.y)}>
-      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform active:scale-100" style={{ fontSize: `${group.fontSize}px`, zIndex: 50 }}>
+      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform active:scale-100 group" style={{ fontSize: `${group.fontSize}px`, zIndex: 50 }}>
+        
+        {/* INDIKATOR HOVER UX */}
+        <div className="absolute -top-5 left-0 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg whitespace-nowrap z-50">
+          Layer {index + 1}
+        </div>
+
         {group.lines.map((line) => {
           const finalColor = line.customColor !== "" ? line.customColor : getDefaultColor(line.type);
           return (
@@ -121,12 +127,12 @@ export default function Home() {
   const [image, setImage] = useState<string | null>(null);
   const [textGroups, setTextGroups] = useState<TextGroup[]>([]);
   
-  // State Dimensi & Workspace
+  // State UX Dropdown (Accordion)
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+
   const [canvasWidth, setCanvasWidth] = useState<number>(1280);
   const [canvasHeight, setCanvasHeight] = useState<number>(720);
   const [workspaceZoom, setWorkspaceZoom] = useState<number>(1);
-  
-  // State Latar Belakang
   const [showBg, setShowBg] = useState<boolean>(true);
   const [bgScale, setBgScale] = useState<number>(1);
   const [bgX, setBgX] = useState<number>(0);
@@ -137,7 +143,6 @@ export default function Home() {
   const [lang, setLang] = useState<'id' | 'en'>('id');
   const t = dict[lang];
 
-  // --- NATIVE RESIZE OBSERVER (Sinkronisasi CSS Resize ke Input W/H) ---
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -147,7 +152,6 @@ export default function Home() {
         const newW = Math.round(entry.contentRect.width);
         const newH = Math.round(entry.contentRect.height);
         
-        // Mencegah infinite loop rendering, update state hanya jika perbedaan > 2px (tarikan mouse)
         setCanvasWidth((prev) => (Math.abs(prev - newW) > 2 ? newW : prev));
         setCanvasHeight((prev) => (Math.abs(prev - newH) > 2 ? newH : prev));
       }
@@ -155,9 +159,8 @@ export default function Home() {
 
     resizeObserver.observe(el);
     return () => resizeObserver.disconnect();
-  }, [image]); // Re-bind observer saat gambar (kanvas) ter-render
+  }, [image]);
 
-  // --- AUTO-SAVE HYDRATION ---
   useEffect(() => {
     const saved = localStorage.getItem(SAVE_KEY);
     if (saved) {
@@ -198,6 +201,7 @@ export default function Home() {
     if (confirm(t.confirmReset)) {
       setImage(null);
       setTextGroups([]);
+      setActiveLayerId(null);
       setCanvasWidth(1280);
       setCanvasHeight(720);
       setBgScale(1);
@@ -224,7 +228,6 @@ export default function Home() {
           setBgX(0);
           setBgY(0);
           
-          // Auto zoom-out jika resolusi gambar lebih besar dari layar laptop standar
           if (img.naturalWidth > 1400) {
             setWorkspaceZoom(0.6);
           } else {
@@ -240,7 +243,6 @@ export default function Home() {
   const handleExport = useCallback(async () => {
     if (canvasRef.current === null) return;
     try {
-      // Hilangkan gaya resize saat export agar sudut 'resize' browser tidak ikut ter-render
       canvasRef.current.style.resize = 'none';
       const dataUrl = await toPng(canvasRef.current, { cacheBust: true, quality: 1.0 });
       canvasRef.current.style.resize = 'both';
@@ -255,18 +257,23 @@ export default function Home() {
     }
   }, [canvasRef]);
 
-  // --- LOGIKA GROUP TEKS ---
   const addTextGroup = () => {
+    const newId = Date.now().toString();
     const newGroup: TextGroup = {
-      id: Date.now().toString(),
+      id: newId,
       fontSize: 16,
       x: 24, y: 24,
       lines: [{ id: Date.now().toString() + "-1", text: "Nama_Karakter says: ", type: 'chat', customColor: "" }],
     };
     setTextGroups([...textGroups, newGroup]);
+    setActiveLayerId(newId); // Otomatis buka accordion untuk layer baru
   };
 
-  const deleteTextGroup = (id: string) => setTextGroups(textGroups.filter((group) => group.id !== id));
+  const deleteTextGroup = (id: string) => {
+    setTextGroups(textGroups.filter((group) => group.id !== id));
+    if (activeLayerId === id) setActiveLayerId(null);
+  };
+  
   const updateGroupSetting = (id: string, key: keyof TextGroup, value: number) => setTextGroups(textGroups.map(g => g.id === id ? { ...g, [key]: value } : g));
   const handleDrag = (id: string, x: number, y: number) => setTextGroups(prev => prev.map(g => g.id === id ? { ...g, x, y } : g));
 
@@ -292,12 +299,6 @@ export default function Home() {
 
   const removeLine = (groupId: string, lineId: string) => {
     setTextGroups(textGroups.map(group => group.id === groupId ? { ...group, lines: group.lines.filter(line => line.id !== lineId) } : group));
-  };
-
-  // --- PRESET KANVAS ---
-  const applyPreset = (w: number, h: number) => {
-    setCanvasWidth(w);
-    setCanvasHeight(h);
   };
 
   if (!isMounted) return null;
@@ -387,51 +388,39 @@ export default function Home() {
               </label>
             </div>
           ) : (
-            <div className="min-h-full min-w-full flex items-center justify-center p-16">
+            <div className="min-h-full min-w-full flex items-center justify-center p-16 pb-24">
               
-              {/* WORKSPACE SCALER (Figma Style Zoom) */}
               <div style={{ transform: `scale(${workspaceZoom})`, transformOrigin: 'center center', transition: 'transform 0.15s ease-out' }}>
-                
-                {/* KANVAS DENGAN NATIVE CSS RESIZE (CROP) */}
                 <div 
                   ref={canvasRef} 
                   className="relative shadow-[0_4px_40px_rgba(0,0,0,0.4)] overflow-hidden bg-black ring-1 ring-white/10"
-                  style={{ 
-                    width: `${canvasWidth}px`, 
-                    height: `${canvasHeight}px`,
-                    resize: 'both' // Native drag handler browser
-                  }}
+                  style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px`, resize: 'both' }}
                 >
-                  {/* Latar Belakang Gambar Toggle */}
                   {showBg && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
                       <img 
                         src={image} 
                         alt="SSRP Background" 
                         className="object-none max-w-none"
-                        style={{ 
-                          transform: `translate(${bgX}px, ${bgY}px) scale(${bgScale})`,
-                        }} 
+                        style={{ transform: `translate(${bgX}px, ${bgY}px) scale(${bgScale})` }} 
                       />
                     </div>
                   )}
 
-                  {/* Layer Teks */}
                   <div className="absolute inset-0 z-10 pointer-events-none">
                     <div className="w-full h-full pointer-events-auto relative">
-                      {textGroups.map((group) => (
-                        <DraggableText key={group.id} group={group} onDrag={handleDrag} scale={workspaceZoom} />
+                      {textGroups.map((group, index) => (
+                        <DraggableText key={group.id} index={index} group={group} onDrag={handleDrag} scale={workspaceZoom} />
                       ))}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* KONTROL ZOOM WORKSPACE MENGAMBANG */}
-              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-900/95 p-2 rounded-full border border-zinc-700 shadow-2xl backdrop-blur-md z-50 text-white">
-                <button onClick={() => setWorkspaceZoom(p => Math.max(0.2, p - 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomOut size={16}/></button>
+              <div className="fixed bottom-6 left-[calc(50%-180px)] -translate-x-1/2 flex items-center gap-3 bg-zinc-900/95 p-2 rounded-full border border-zinc-700 shadow-2xl backdrop-blur-md z-50 text-white">
+                <button onClick={() => setWorkspaceZoom(p => Math.max(0.2, p - 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomOutIcon size={16}/></button>
                 <span className="text-xs font-semibold w-12 text-center select-none">{Math.round(workspaceZoom * 100)}%</span>
-                <button onClick={() => setWorkspaceZoom(p => Math.min(3, p + 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomIn size={16}/></button>
+                <button onClick={() => setWorkspaceZoom(p => Math.min(3, p + 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomInIcon size={16}/></button>
               </div>
 
             </div>
@@ -447,7 +436,7 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto p-4 space-y-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full">
             
             <div className="space-y-4">
-              {/* RESOLUTION KANVAS & PRESET CROP */}
+              {/* RESOLUTION KANVAS */}
               <div className="space-y-2">
                 <div className="flex justify-between items-end">
                   <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
@@ -463,20 +452,9 @@ export default function Home() {
                     <input type="number" value={canvasHeight} onChange={(e) => setCanvasHeight(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5 pt-1">
-                  <button onClick={() => applyPreset(1280, 720)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
-                    <Maximize size={10} /> 16:9
-                  </button>
-                  <button onClick={() => applyPreset(1024, 768)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
-                    <Maximize size={10} /> 4:3
-                  </button>
-                  <button onClick={() => applyPreset(800, 800)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
-                    <Maximize size={10} /> 1:1
-                  </button>
-                </div>
               </div>
 
-              {/* BACKGROUND ADJUSTMENTS & TOGGLE */}
+              {/* BACKGROUND ADJUSTMENTS */}
               {image && (
                 <div className={`space-y-3 pt-4 border-t ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
                   <div className="flex items-center justify-between mb-2">
@@ -488,7 +466,7 @@ export default function Home() {
                   
                   <div className={`transition-opacity duration-300 ${showBg ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
                     <div className="flex items-center gap-3 mb-3">
-                      <ZoomIn size={14} className="text-zinc-500" />
+                      <ZoomInIcon size={14} className="text-zinc-500" />
                       <input type="range" min="0.1" max="3" step="0.05" value={bgScale} onChange={(e) => setBgScale(Number(e.target.value))} className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
                       <span className="text-[10px] text-zinc-400 w-6 font-medium">{bgScale.toFixed(1)}x</span>
                     </div>
@@ -526,89 +504,102 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {textGroups.map((group, index) => (
-                      <div key={group.id} className={`border rounded-xl overflow-hidden transition-all ${cardClasses}`}>
-                        
-                        <div className={`px-3 py-2 flex justify-between items-center border-b ${isDark ? 'bg-zinc-900/80 border-zinc-800' : 'bg-gray-100 border-gray-200'}`}>
-                          <span className="font-semibold text-xs flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> {t.layer} {index + 1}
-                          </span>
-                          <button onClick={() => deleteTextGroup(group.id)} className="text-zinc-400 hover:text-red-500 transition-colors p-1">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                        
-                        <div className="p-3 space-y-3">
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="space-y-1">
-                              <label className="text-[10px] text-zinc-500 font-medium">{t.fontSize}</label>
-                              <input type="number" value={group.fontSize} onChange={(e) => updateGroupSetting(group.id, 'fontSize', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[10px] text-zinc-500 font-medium">X Pos</label>
-                              <input type="number" value={Math.round(group.x)} onChange={(e) => updateGroupSetting(group.id, 'x', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[10px] text-zinc-500 font-medium">Y Pos</label>
-                              <input type="number" value={Math.round(group.y)} onChange={(e) => updateGroupSetting(group.id, 'y', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
-                            </div>
-                          </div>
+                    {/* IMPLEMENTASI ACCORDION LAYERS */}
+                    {textGroups.map((group, index) => {
+                      const isActive = activeLayerId === group.id;
 
-                          <div className="space-y-1.5">
-                            {group.lines.map((line) => (
-                              <div key={line.id} className={`group relative rounded-md p-2 border transition-colors ${isDark ? 'bg-zinc-950 border-zinc-800 focus-within:border-indigo-500/50' : 'bg-white border-gray-300 focus-within:border-indigo-500'}`}>
-                                <div className="absolute -top-2 left-2 px-1 text-[9px] font-bold uppercase tracking-wider rounded bg-zinc-900 text-zinc-400">
-                                  {getLineLabel(line.type)}
+                      return (
+                        <div key={group.id} className={`border rounded-xl overflow-hidden transition-all ${cardClasses} ${isActive ? 'ring-1 ring-indigo-500/50' : ''}`}>
+                          
+                          {/* HEADER ACCORDION (Bisa di-klik) */}
+                          <div 
+                            className={`px-3 py-2.5 flex justify-between items-center cursor-pointer select-none transition-colors ${isActive ? (isDark ? 'bg-zinc-800/50 border-b border-zinc-800' : 'bg-gray-100 border-b border-gray-200') : (isDark ? 'bg-zinc-900/80 hover:bg-zinc-800' : 'bg-gray-50 hover:bg-gray-100')}`}
+                            onClick={() => setActiveLayerId(isActive ? null : group.id)}
+                          >
+                            <span className="font-semibold text-xs flex items-center gap-2 text-zinc-300">
+                              {isActive ? <ChevronDown size={14} className="text-indigo-500"/> : <ChevronRight size={14} className="text-zinc-500"/>}
+                              {t.layer} {index + 1}
+                            </span>
+                            <button onClick={(e) => { e.stopPropagation(); deleteTextGroup(group.id); }} className="text-zinc-500 hover:text-red-500 transition-colors p-1">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                          
+                          {/* KONTEN LAYER (Hanya muncul jika aktif) */}
+                          {isActive && (
+                            <div className="p-3 space-y-3">
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] text-zinc-500 font-medium">{t.fontSize}</label>
+                                  <input type="number" value={group.fontSize} onChange={(e) => updateGroupSetting(group.id, 'fontSize', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
                                 </div>
-                                <div className="flex gap-2 mt-1">
-                                  <textarea
-                                    value={line.text}
-                                    onChange={(e) => updateLine(group.id, line.id, "text", e.target.value)}
-                                    className="flex-1 bg-transparent border-none focus:outline-none text-xs resize-none h-auto min-h-[18px]"
-                                    placeholder={t.typeHere}
-                                    rows={1}
-                                  />
-                                  <button onClick={() => removeLine(group.id, line.id)} className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all self-start">
-                                    <Trash2 size={12} />
-                                  </button>
+                                <div className="space-y-1">
+                                  <label className="text-[10px] text-zinc-500 font-medium">X Pos</label>
+                                  <input type="number" value={Math.round(group.x)} onChange={(e) => updateGroupSetting(group.id, 'x', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
                                 </div>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <div className="w-4 h-4 rounded-sm overflow-hidden relative border border-zinc-400/20">
-                                    <input type="color" value={line.customColor || getDefaultColor(line.type)} onChange={(e) => updateLine(group.id, line.id, "customColor", e.target.value)} className="absolute -top-2 -left-2 w-8 h-8 cursor-pointer" />
-                                  </div>
-                                  {line.customColor !== "" && (
-                                    <button onClick={() => updateLine(group.id, line.id, "customColor", "")} className="text-[10px] text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
-                                      <RefreshCcw size={10} /> {t.reset}
-                                    </button>
-                                  )}
+                                <div className="space-y-1">
+                                  <label className="text-[10px] text-zinc-500 font-medium">Y Pos</label>
+                                  <input type="number" value={Math.round(group.y)} onChange={(e) => updateGroupSetting(group.id, 'y', Number(e.target.value))} className={`w-full rounded-md p-1.5 text-xs text-center outline-none border ${inputClasses}`} />
                                 </div>
                               </div>
-                            ))}
-                          </div>
 
-                          <div className="grid grid-cols-3 gap-1.5 pt-1">
-                            <button onClick={() => addLineToGroup(group.id, 'chat')} className={`py-1.5 rounded-md text-[10px] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <MessageSquare size={10} /> {t.normal}
-                            </button>
-                            <button onClick={() => addLineToGroup(group.id, 'me')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <User size={10} /> /me
-                            </button>
-                            <button onClick={() => addLineToGroup(group.id, 'do')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <Globe size={10} /> /do
-                            </button>
-                            <button onClick={() => addLineToGroup(group.id, 'ooc')} className={`py-1.5 rounded-md text-[10px] text-[#b9c9bf] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <MessageCircle size={10} /> OOC
-                            </button>
-                            <button onClick={() => addLineToGroup(group.id, 'radio')} className={`py-1.5 rounded-md text-[10px] text-[#33aa33] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <Radio size={10} /> Radio
-                            </button>
-                            <button onClick={() => addLineToGroup(group.id, 'low')} className={`py-1.5 rounded-md text-[10px] text-[#c8c8c8] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <Volume1 size={10} /> Low
-                            </button>
-                          </div>
+                              <div className="space-y-1.5">
+                                {group.lines.map((line) => (
+                                  <div key={line.id} className={`group relative rounded-md p-2 border transition-colors ${isDark ? 'bg-zinc-950 border-zinc-800 focus-within:border-indigo-500/50' : 'bg-white border-gray-300 focus-within:border-indigo-500'}`}>
+                                    <div className="absolute -top-2 left-2 px-1 text-[9px] font-bold uppercase tracking-wider rounded bg-zinc-900 text-zinc-400">
+                                      {getLineLabel(line.type)}
+                                    </div>
+                                    <div className="flex gap-2 mt-1">
+                                      <textarea
+                                        value={line.text}
+                                        onChange={(e) => updateLine(group.id, line.id, "text", e.target.value)}
+                                        className="flex-1 bg-transparent border-none focus:outline-none text-xs resize-none h-auto min-h-[18px]"
+                                        placeholder={t.typeHere}
+                                        rows={1}
+                                      />
+                                      <button onClick={() => removeLine(group.id, line.id)} className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all self-start">
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <div className="w-4 h-4 rounded-sm overflow-hidden relative border border-zinc-400/20">
+                                        <input type="color" value={line.customColor || getDefaultColor(line.type)} onChange={(e) => updateLine(group.id, line.id, "customColor", e.target.value)} className="absolute -top-2 -left-2 w-8 h-8 cursor-pointer" />
+                                      </div>
+                                      {line.customColor !== "" && (
+                                        <button onClick={() => updateLine(group.id, line.id, "customColor", "")} className="text-[10px] text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
+                                          <RefreshCcw size={10} /> {t.reset}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                                <button onClick={() => addLineToGroup(group.id, 'chat')} className={`py-1.5 rounded-md text-[10px] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <MessageSquare size={10} /> {t.normal}
+                                </button>
+                                <button onClick={() => addLineToGroup(group.id, 'me')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <User size={10} /> /me
+                                </button>
+                                <button onClick={() => addLineToGroup(group.id, 'do')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <Globe size={10} /> /do
+                                </button>
+                                <button onClick={() => addLineToGroup(group.id, 'ooc')} className={`py-1.5 rounded-md text-[10px] text-[#b9c9bf] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <MessageCircle size={10} /> OOC
+                                </button>
+                                <button onClick={() => addLineToGroup(group.id, 'radio')} className={`py-1.5 rounded-md text-[10px] text-[#33aa33] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <Radio size={10} /> Radio
+                                </button>
+                                <button onClick={() => addLineToGroup(group.id, 'low')} className={`py-1.5 rounded-md text-[10px] text-[#c8c8c8] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                  <Volume1 size={10} /> Low
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

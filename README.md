@@ -7,6 +7,8 @@
 
 SSRP Studio adalah aplikasi web *client-side* untuk membuat dan mengedit *Screenshot Roleplay* (SSRP) GTA: San Andreas Multiplayer (SAMP) langsung di browser. Aplikasi ini dirancang agar proses penyusunan chat roleplay, pengaturan posisi teks, dan ekspor gambar bisa dilakukan dengan cepat tanpa perlu software edit gambar tambahan.
 
+Pembaruan terbaru menambahkan kontrol latar yang lebih fleksibel, zoom workspace untuk penyesuaian detail, dan penyimpanan draft lokal agar sesi editing tidak mudah hilang saat halaman dimuat ulang.
+
 **Live Demo:** [https://tools-ssrp.vercel.app/](https://tools-ssrp.vercel.app/)
 
 ## Fitur Utama
@@ -18,6 +20,10 @@ SSRP Studio adalah aplikasi web *client-side* untuk membuat dan mengedit *Screen
 - Preset konteks roleplay bawaan untuk `chat`, `/me`, `/do`, `OOC`, `Radio`, dan `Low`.
 - Render teks bergaya SAMP dengan font Arial/Tahoma, teks tebal, dan *text shadow* 8 arah.
 - Ubah ukuran kanvas agar cocok dengan resolusi screenshot asli.
+- Zoom workspace untuk memperbesar atau memperkecil tampilan saat menempatkan teks.
+- Tampilkan atau sembunyikan latar screenshot saat fokus ke layer teks.
+- Atur skala, posisi X, dan posisi Y background secara langsung dari panel properti.
+- Draft editing tersimpan otomatis di browser melalui local storage.
 - Mode gelap/terang untuk kenyamanan saat mengedit.
 - Dukungan bahasa Indonesia dan Inggris.
 - Ekspor hasil akhir ke PNG langsung dari browser menggunakan `html-to-image`.
@@ -73,11 +79,13 @@ npm run lint
 
 1. Upload screenshot yang ingin dijadikan basis SSRP.
 2. Sesuaikan ukuran kanvas bila resolusi gambar perlu diubah.
-3. Tambahkan *text layer* baru untuk setiap blok dialog atau aksi.
-4. Pilih preset tipe teks yang sesuai, misalnya `chat`, `/me`, atau `Radio`.
-5. Geser teks langsung di kanvas atau isi nilai X/Y dari panel properti.
-6. Ubah isi teks dan warna jika diperlukan.
-7. Klik *Export Image* untuk mengunduh hasil komposit dalam format PNG.
+3. Atur background dengan opsi skala, posisi, atau sembunyikan latar jika ingin fokus ke teks.
+4. Tambahkan *text layer* baru untuk setiap blok dialog atau aksi.
+5. Pilih preset tipe teks yang sesuai, misalnya `chat`, `/me`, atau `Radio`.
+6. Geser teks langsung di kanvas atau isi nilai X/Y dari panel properti.
+7. Gunakan zoom workspace saat butuh penempatan yang lebih presisi.
+8. Ubah isi teks dan warna jika diperlukan.
+9. Klik *Export Image* untuk mengunduh hasil komposit dalam format PNG.
 
 ## Struktur Proyek
 
@@ -108,6 +116,12 @@ Langkah umum deployment:
 ## Kontribusi
 
 Jika ingin menambahkan fitur baru, lakukan fork lalu kirim pull request dengan perubahan yang terfokus dan konsisten dengan gaya proyek ini.
+
+Contoh commit message yang sesuai untuk pembaruan ini:
+
+```bash
+docs: update readme for background controls and workspace zoom
+```
 
 ## Lisensi
 
