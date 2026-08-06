@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Draggable from "react-draggable";
 import { toPng } from "html-to-image";
-import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1, Move, ZoomIn, Crop } from "lucide-react";
+import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1, Move, ZoomIn, Eye, EyeOff, ZoomOut, Maximize } from "lucide-react";
 
 type LineType = 'chat' | 'me' | 'do' | 'ooc' | 'radio' | 'low';
 
@@ -22,7 +22,6 @@ type TextGroup = {
   y: number; 
 };
 
-// --- KAMUS BAHASA ---
 const dict = {
   id: {
     title: "SSRP Studio",
@@ -32,6 +31,7 @@ const dict = {
     chooseImage: "Pilih Gambar",
     properties: "Pengaturan",
     canvasSize: "Ukuran Kanvas (Crop)",
+    bgVisibility: "Visibilitas Latar",
     bgAdjust: "Penyesuaian Latar",
     scale: "Skala",
     textLayers: "Lapisan Teks",
@@ -54,6 +54,7 @@ const dict = {
     chooseImage: "Choose Image",
     properties: "Properties",
     canvasSize: "Canvas Size (Crop)",
+    bgVisibility: "Background Visibility",
     bgAdjust: "Background Adjust",
     scale: "Scale",
     textLayers: "Text Layers",
@@ -82,13 +83,14 @@ const getDefaultColor = (type: LineType) => {
   }
 };
 
-const DraggableText = ({ group, onDrag }: { group: TextGroup; onDrag: (id: string, x: number, y: number) => void; }) => {
+// Menambahkan properti scale agar mouse drag akurat saat workspace di-zoom
+const DraggableText = ({ group, onDrag, scale }: { group: TextGroup; onDrag: (id: string, x: number, y: number) => void; scale: number; }) => {
   const nodeRef = useRef<HTMLDivElement>(null);
   const sampTextShadow = "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000";
 
   return (
-    <Draggable nodeRef={nodeRef} bounds="parent" position={{ x: group.x, y: group.y }} onDrag={(e, data) => onDrag(group.id, data.x, data.y)}>
-      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform hover:scale-[1.01] active:scale-100" style={{ fontSize: `${group.fontSize}px`, zIndex: 50 }}>
+    <Draggable nodeRef={nodeRef} bounds="parent" position={{ x: group.x, y: group.y }} scale={scale} onDrag={(e, data) => onDrag(group.id, data.x, data.y)}>
+      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform active:scale-100" style={{ fontSize: `${group.fontSize}px`, zIndex: 50 }}>
         {group.lines.map((line) => {
           const finalColor = line.customColor !== "" ? line.customColor : getDefaultColor(line.type);
           return (
@@ -119,56 +121,41 @@ export default function Home() {
   const [image, setImage] = useState<string | null>(null);
   const [textGroups, setTextGroups] = useState<TextGroup[]>([]);
   
-  // State Dimensi & Latar
+  // State Dimensi & Workspace
   const [canvasWidth, setCanvasWidth] = useState<number>(1280);
   const [canvasHeight, setCanvasHeight] = useState<number>(720);
+  const [workspaceZoom, setWorkspaceZoom] = useState<number>(1);
+  
+  // State Latar Belakang
+  const [showBg, setShowBg] = useState<boolean>(true);
   const [bgScale, setBgScale] = useState<number>(1);
   const [bgX, setBgX] = useState<number>(0);
   const [bgY, setBgY] = useState<number>(0);
-
-  // --- LOGIKA KUSTOM VISUAL CROP / RESIZE ---
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [isDark, setIsDark] = useState<boolean>(true);
   const [lang, setLang] = useState<'id' | 'en'>('id');
   const t = dict[lang];
 
-  // Inisialisasi Event Listener untuk Dragging Canvas (Crop)
+  // --- NATIVE RESIZE OBSERVER (Sinkronisasi CSS Resize ke Input W/H) ---
   useEffect(() => {
-    const handleResizeMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const deltaX = e.clientX - resizeStart.x;
-      const deltaY = e.clientY - resizeStart.y;
-      
-      // Mencegah kanvas menjadi terlalu kecil (minimum 200x200 piksel)
-      setCanvasWidth(Math.round(Math.max(200, resizeStart.w + deltaX)));
-      setCanvasHeight(Math.round(Math.max(200, resizeStart.h + deltaY)));
-    };
-    
-    const handleResizeUp = () => setIsResizing(false);
+    const el = canvasRef.current;
+    if (!el) return;
 
-    if (isResizing) {
-      // Mencegah block text selection saat melakukan dragging
-      document.body.style.userSelect = 'none';
-      window.addEventListener('mousemove', handleResizeMove);
-      window.addEventListener('mouseup', handleResizeUp);
-    } else {
-      document.body.style.userSelect = 'auto';
-    }
-    
-    return () => {
-      window.removeEventListener('mousemove', handleResizeMove);
-      window.removeEventListener('mouseup', handleResizeUp);
-    };
-  }, [isResizing, resizeStart]);
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const newW = Math.round(entry.contentRect.width);
+        const newH = Math.round(entry.contentRect.height);
+        
+        // Mencegah infinite loop rendering, update state hanya jika perbedaan > 2px (tarikan mouse)
+        setCanvasWidth((prev) => (Math.abs(prev - newW) > 2 ? newW : prev));
+        setCanvasHeight((prev) => (Math.abs(prev - newH) > 2 ? newH : prev));
+      }
+    });
 
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-    setResizeStart({ x: e.clientX, y: e.clientY, w: canvasWidth, h: canvasHeight });
-  };
+    resizeObserver.observe(el);
+    return () => resizeObserver.disconnect();
+  }, [image]); // Re-bind observer saat gambar (kanvas) ter-render
 
   // --- AUTO-SAVE HYDRATION ---
   useEffect(() => {
@@ -184,6 +171,7 @@ export default function Home() {
           if (parsed.bgScale) setBgScale(parsed.bgScale);
           if (parsed.bgX) setBgX(parsed.bgX);
           if (parsed.bgY) setBgY(parsed.bgY);
+          if (parsed.showBg !== undefined) setShowBg(parsed.showBg);
         }
       } catch (e) {
         console.error("Gagal membaca draft SSRP", e);
@@ -194,18 +182,17 @@ export default function Home() {
 
   useEffect(() => {
     if (!isMounted) return;
-    const draft = { image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY };
+    const draft = { image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY, showBg };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(draft));
     } catch (e) {
-      console.warn("Storage quota exceeded. Menyimpan relasi teks dan koordinat tanpa objek image.");
       try {
         localStorage.setItem(SAVE_KEY, JSON.stringify({ ...draft, image: null }));
       } catch (err) {
         console.error("Gagal total menyimpan persistensi status", err);
       }
     }
-  }, [image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY, isMounted]);
+  }, [image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY, showBg, isMounted]);
 
   const handleResetProject = () => {
     if (confirm(t.confirmReset)) {
@@ -216,6 +203,7 @@ export default function Home() {
       setBgScale(1);
       setBgX(0);
       setBgY(0);
+      setWorkspaceZoom(1);
       localStorage.removeItem(SAVE_KEY);
     }
   };
@@ -235,6 +223,13 @@ export default function Home() {
           setBgScale(1);
           setBgX(0);
           setBgY(0);
+          
+          // Auto zoom-out jika resolusi gambar lebih besar dari layar laptop standar
+          if (img.naturalWidth > 1400) {
+            setWorkspaceZoom(0.6);
+          } else {
+            setWorkspaceZoom(1);
+          }
         };
         img.src = base64;
       };
@@ -245,13 +240,10 @@ export default function Home() {
   const handleExport = useCallback(async () => {
     if (canvasRef.current === null) return;
     try {
-      // Sembunyikan handle crop sementara saat mengekspor gambar
-      const handleElement = document.getElementById('crop-handle');
-      if (handleElement) handleElement.style.display = 'none';
-
+      // Hilangkan gaya resize saat export agar sudut 'resize' browser tidak ikut ter-render
+      canvasRef.current.style.resize = 'none';
       const dataUrl = await toPng(canvasRef.current, { cacheBust: true, quality: 1.0 });
-      
-      if (handleElement) handleElement.style.display = 'flex';
+      canvasRef.current.style.resize = 'both';
 
       const link = document.createElement('a');
       link.download = `SSRP_Studio_${Date.now()}.png`;
@@ -263,6 +255,7 @@ export default function Home() {
     }
   }, [canvasRef]);
 
+  // --- LOGIKA GROUP TEKS ---
   const addTextGroup = () => {
     const newGroup: TextGroup = {
       id: Date.now().toString(),
@@ -299,6 +292,12 @@ export default function Home() {
 
   const removeLine = (groupId: string, lineId: string) => {
     setTextGroups(textGroups.map(group => group.id === groupId ? { ...group, lines: group.lines.filter(line => line.id !== lineId) } : group));
+  };
+
+  // --- PRESET KANVAS ---
+  const applyPreset = (w: number, h: number) => {
+    setCanvasWidth(w);
+    setCanvasHeight(h);
   };
 
   if (!isMounted) return null;
@@ -369,7 +368,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         <div className={`flex-1 relative overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full ${workspaceBg}`}>
           
           {!image ? (
@@ -388,47 +387,58 @@ export default function Home() {
               </label>
             </div>
           ) : (
-            <div className="min-h-full min-w-full flex items-center justify-center p-8">
-              <div 
-                ref={canvasRef} 
-                className={`relative shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden bg-black ring-1 ${isResizing ? 'ring-indigo-500 ring-2' : 'ring-black/10'}`} 
-                style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}
-              >
-                {/* Latar Belakang Gambar yang bisa dimanipulasi */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <img 
-                    src={image} 
-                    alt="SSRP Background" 
-                    className="object-none max-w-none"
-                    style={{ 
-                      transform: `translate(${bgX}px, ${bgY}px) scale(${bgScale})`,
-                      transition: isResizing ? 'none' : 'transform 0.1s ease-out'
-                    }} 
-                  />
-                </div>
-
-                {/* Layer Teks */}
-                {textGroups.map((group) => (
-                  <DraggableText key={group.id} group={group} onDrag={handleDrag} />
-                ))}
-
-                {/* Handle Crop / Resize Kustom */}
+            <div className="min-h-full min-w-full flex items-center justify-center p-16">
+              
+              {/* WORKSPACE SCALER (Figma Style Zoom) */}
+              <div style={{ transform: `scale(${workspaceZoom})`, transformOrigin: 'center center', transition: 'transform 0.15s ease-out' }}>
+                
+                {/* KANVAS DENGAN NATIVE CSS RESIZE (CROP) */}
                 <div 
-                  id="crop-handle"
-                  onMouseDown={handleResizeMouseDown}
-                  className="absolute bottom-0 right-0 w-8 h-8 cursor-se-resize flex items-end justify-end z-[100] group"
-                  title="Tarik untuk memotong (Crop) kanvas"
+                  ref={canvasRef} 
+                  className="relative shadow-[0_4px_40px_rgba(0,0,0,0.4)] overflow-hidden bg-black ring-1 ring-white/10"
+                  style={{ 
+                    width: `${canvasWidth}px`, 
+                    height: `${canvasHeight}px`,
+                    resize: 'both' // Native drag handler browser
+                  }}
                 >
-                  <div className="w-4 h-4 bg-indigo-500/80 group-hover:bg-indigo-500 rounded-tl-lg flex items-center justify-center shadow-lg transition-colors border-t border-l border-white/20">
-                    <Crop size={10} className="text-white" />
+                  {/* Latar Belakang Gambar Toggle */}
+                  {showBg && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+                      <img 
+                        src={image} 
+                        alt="SSRP Background" 
+                        className="object-none max-w-none"
+                        style={{ 
+                          transform: `translate(${bgX}px, ${bgY}px) scale(${bgScale})`,
+                        }} 
+                      />
+                    </div>
+                  )}
+
+                  {/* Layer Teks */}
+                  <div className="absolute inset-0 z-10 pointer-events-none">
+                    <div className="w-full h-full pointer-events-auto relative">
+                      {textGroups.map((group) => (
+                        <DraggableText key={group.id} group={group} onDrag={handleDrag} scale={workspaceZoom} />
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* KONTROL ZOOM WORKSPACE MENGAMBANG */}
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-900/95 p-2 rounded-full border border-zinc-700 shadow-2xl backdrop-blur-md z-50 text-white">
+                <button onClick={() => setWorkspaceZoom(p => Math.max(0.2, p - 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomOut size={16}/></button>
+                <span className="text-xs font-semibold w-12 text-center select-none">{Math.round(workspaceZoom * 100)}%</span>
+                <button onClick={() => setWorkspaceZoom(p => Math.min(3, p + 0.1))} className="p-1.5 hover:bg-zinc-700 rounded-full transition-colors"><ZoomIn size={16}/></button>
+              </div>
+
             </div>
           )}
         </div>
 
-        <aside className={`w-[360px] flex flex-col z-10 shadow-2xl border-l transition-colors ${panelClasses}`}>
+        <aside className={`w-[360px] flex flex-col z-10 shadow-2xl border-l transition-colors relative ${panelClasses}`}>
           <div className={`p-4 border-b flex items-center gap-2 ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
             <Settings size={18} className="text-indigo-500" />
             <h2 className="font-semibold">{t.properties}</h2>
@@ -437,9 +447,12 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto p-4 space-y-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full">
             
             <div className="space-y-4">
-              {/* RESOLUTION KANVAS */}
+              {/* RESOLUTION KANVAS & PRESET CROP */}
               <div className="space-y-2">
-                <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
+                <div className="flex justify-between items-end">
+                  <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
+                  <span className="text-[10px] text-zinc-500">*Tarik sudut bawah kanvas</span>
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">W</span>
@@ -450,29 +463,47 @@ export default function Home() {
                     <input type="number" value={canvasHeight} onChange={(e) => setCanvasHeight(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
                   </div>
                 </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button onClick={() => applyPreset(1280, 720)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
+                    <Maximize size={10} /> 16:9
+                  </button>
+                  <button onClick={() => applyPreset(1024, 768)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
+                    <Maximize size={10} /> 4:3
+                  </button>
+                  <button onClick={() => applyPreset(800, 800)} className={`py-1.5 text-[10px] rounded-md font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-zinc-600'}`}>
+                    <Maximize size={10} /> 1:1
+                  </button>
+                </div>
               </div>
 
-              {/* BACKGROUND ADJUSTMENTS */}
+              {/* BACKGROUND ADJUSTMENTS & TOGGLE */}
               {image && (
                 <div className={`space-y-3 pt-4 border-t ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
-                  <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.bgAdjust}</label>
-                  
-                  <div className="flex items-center gap-3">
-                    <ZoomIn size={14} className="text-zinc-500" />
-                    <input type="range" min="0.1" max="3" step="0.05" value={bgScale} onChange={(e) => setBgScale(Number(e.target.value))} className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-                    <span className="text-[10px] text-zinc-400 w-6 font-medium">{bgScale.toFixed(1)}x</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.bgAdjust}</label>
+                    <button onClick={() => setShowBg(!showBg)} className={`px-2 py-1 text-[10px] rounded-md font-medium flex items-center gap-1.5 transition-colors ${showBg ? (isDark ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-600') : (isDark ? 'bg-zinc-800 text-zinc-500' : 'bg-gray-200 text-zinc-500')}`}>
+                      {showBg ? <Eye size={12} /> : <EyeOff size={12} />} {t.bgVisibility}
+                    </button>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
-                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">X</span>
-                      <input type="number" value={bgX} onChange={(e) => setBgX(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+                  
+                  <div className={`transition-opacity duration-300 ${showBg ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <ZoomIn size={14} className="text-zinc-500" />
+                      <input type="range" min="0.1" max="3" step="0.05" value={bgScale} onChange={(e) => setBgScale(Number(e.target.value))} className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                      <span className="text-[10px] text-zinc-400 w-6 font-medium">{bgScale.toFixed(1)}x</span>
                     </div>
-                    <div className="flex-1 relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
-                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">Y</span>
-                      <input type="number" value={bgY} onChange={(e) => setBgY(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
+                        <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">X</span>
+                        <input type="number" value={bgX} onChange={(e) => setBgX(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+                      </div>
+                      <div className="flex-1 relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
+                        <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">Y</span>
+                        <input type="number" value={bgY} onChange={(e) => setBgY(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+                      </div>
                     </div>
                   </div>
                 </div>
