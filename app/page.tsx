@@ -3,9 +3,10 @@
 import { useState, useRef, useCallback } from "react";
 import Draggable from "react-draggable";
 import { toPng } from "html-to-image";
-import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages } from "lucide-react";
+import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1 } from "lucide-react";
 
-type LineType = 'chat' | 'me' | 'do';
+// Tipe baris diperbarui dengan tambahan ooc, radio, dan low
+type LineType = 'chat' | 'me' | 'do' | 'ooc' | 'radio' | 'low';
 
 type ChatLine = {
   id: string;
@@ -62,17 +63,28 @@ const dict = {
   }
 };
 
+// Fungsi bantuan untuk mendapatkan warna default sesuai konteks roleplay SAMP
+const getDefaultColor = (type: LineType) => {
+  switch(type) {
+    case 'chat': return '#ffffff';
+    case 'me': return '#c2a2da'; // Ungu RP
+    case 'do': return '#c2a2da'; // Ungu RP
+    case 'ooc': return '#b9c9bf'; // Putih keabu-abuan khas OOC
+    case 'radio': return '#33aa33'; // Hijau Faction (bisa diganti misal #8D8DFF untuk PD)
+    case 'low': return '#ffffff'; // Putih (biasanya sama dengan chat, hanya beda prefix)
+    default: return '#ffffff';
+  }
+};
+
 const DraggableText = ({ group, onDrag }: { group: TextGroup; onDrag: (id: string, x: number, y: number) => void; }) => {
   const nodeRef = useRef<HTMLDivElement>(null);
-  // Style outline hitam tebal khas SAMP JGRP
   const sampTextShadow = "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000";
 
   return (
     <Draggable nodeRef={nodeRef} bounds="parent" position={{ x: group.x, y: group.y }} onDrag={(e, data) => onDrag(group.id, data.x, data.y)}>
       <div ref={nodeRef} className="absolute cursor-move w-max transition-transform hover:scale-[1.01] active:scale-100" style={{ fontSize: `${group.fontSize}px` }}>
         {group.lines.map((line) => {
-          const isAction = line.type === 'me' || line.type === 'do';
-          const defaultColor = isAction ? "#c2a2da" : "#ffffff";
+          const defaultColor = getDefaultColor(line.type);
           const finalColor = line.customColor !== "" ? line.customColor : defaultColor;
 
           return (
@@ -103,16 +115,13 @@ export default function Home() {
   const [canvasHeight, setCanvasHeight] = useState<number>(720);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // --- STATE TEMA & BAHASA ---
   const [isDark, setIsDark] = useState<boolean>(true);
   const [lang, setLang] = useState<'id' | 'en'>('id');
   const t = dict[lang];
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImage(URL.createObjectURL(file));
-    }
+    if (file) setImage(URL.createObjectURL(file));
   };
 
   const handleExport = useCallback(async () => {
@@ -148,6 +157,9 @@ export default function Home() {
     if (type === 'chat') defaultText = "Nama_Karakter says: ";
     if (type === 'me') defaultText = "* Nama_Karakter ";
     if (type === 'do') defaultText = "* ... (( Nama_Karakter ))";
+    if (type === 'ooc') defaultText = "(( [OOC] Nama_Karakter:  ))";
+    if (type === 'radio') defaultText = "** [Radio] Nama_Karakter: ";
+    if (type === 'low') defaultText = "Nama_Karakter says [low]: ";
 
     setTextGroups(textGroups.map(group => group.id === groupId ? {
       ...group, lines: [...group.lines, { id: Date.now().toString(), text: defaultText, type, customColor: "" }]
@@ -164,17 +176,26 @@ export default function Home() {
     setTextGroups(textGroups.map(group => group.id === groupId ? { ...group, lines: group.lines.filter(line => line.id !== lineId) } : group));
   };
 
-  // --- KELAS CSS DINAMIS UNTUK TEMA ---
   const themeClasses = isDark ? "bg-zinc-950 text-zinc-200 border-zinc-800" : "bg-gray-50 text-zinc-800 border-gray-200";
   const panelClasses = isDark ? "bg-zinc-950 border-zinc-800" : "bg-white border-gray-200";
   const cardClasses = isDark ? "bg-zinc-900 border-zinc-800" : "bg-gray-50 border-gray-200";
   const inputClasses = isDark ? "bg-zinc-950 border-zinc-800 focus:border-indigo-500/50 text-white" : "bg-white border-gray-300 focus:border-indigo-500 text-black";
   const workspaceBg = isDark ? "bg-[#121214]" : "bg-[#e5e5e5]";
 
+  const getLineLabel = (type: LineType) => {
+    switch(type) {
+      case 'chat': return t.normal;
+      case 'me': return '/me';
+      case 'do': return '/do';
+      case 'ooc': return 'OOC';
+      case 'radio': return 'Radio';
+      case 'low': return 'Low';
+      default: return '';
+    }
+  };
+
   return (
     <main className={`h-screen flex flex-col overflow-hidden transition-colors duration-300 ${themeClasses} selection:bg-indigo-500/30`}>
-      
-      {/* HEADER / NAVBAR */}
       <header className={`h-16 border-b flex items-center justify-between px-6 shrink-0 z-10 transition-colors ${panelClasses}`}>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
@@ -186,7 +207,6 @@ export default function Home() {
           
           <div className="h-6 w-px bg-zinc-500/30"></div>
           
-          {/* Theme & Lang Toggles */}
           <div className="flex items-center gap-2">
             <button onClick={() => setIsDark(!isDark)} className={`p-2 rounded-md hover:bg-zinc-500/10 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
               {isDark ? <Sun size={18} /> : <Moon size={18} />}
@@ -199,7 +219,6 @@ export default function Home() {
         
         <div className="flex items-center gap-4">
           <a href="https://github.com/RobbyDarmawann" target="_blank" rel="noreferrer" className={`text-sm font-medium flex items-center gap-2 hover:text-indigo-500 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
-            {/* SVG Ikon GitHub (Anti Error) */}
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.02c3.14-.35 6.5-1.4 6.5-7a4.6 4.6 0 0 0-1.39-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.35-3.5 1.25a11.39 11.39 0 0 0-6.2 0C6.5 2.8 5.4 3.15 5.4 3.15a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.2c0 5.6 3.36 6.65 6.5 7a4.8 4.8 0 0 0-1 3.03V22"></path>
               <path d="M9 20c-5 1.5-5-2.5-7-3"></path>
@@ -215,10 +234,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* WORKSPACE */}
       <div className="flex-1 flex overflow-hidden">
-        
-        {/* KIRI: CANVAS AREA */}
         <div className={`flex-1 relative overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full ${workspaceBg}`}>
           
           {!image ? (
@@ -238,11 +254,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="min-h-full min-w-full flex items-center justify-center p-8">
-              <div 
-                ref={canvasRef} 
-                className="relative shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden bg-black transition-all duration-300 ring-1 ring-black/10"
-                style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}
-              >
+              <div ref={canvasRef} className="relative shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden bg-black transition-all duration-300 ring-1 ring-black/10" style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}>
                 <img src={image} alt="SSRP Background" className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
                 {textGroups.map((group) => (
                   <DraggableText key={group.id} group={group} onDrag={handleDrag} />
@@ -252,17 +264,13 @@ export default function Home() {
           )}
         </div>
 
-        {/* KANAN: PROPERTIES PANEL */}
         <aside className={`w-[360px] flex flex-col z-10 shadow-2xl border-l transition-colors ${panelClasses}`}>
-          
           <div className={`p-4 border-b flex items-center gap-2 ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
             <Settings size={18} className="text-indigo-500" />
             <h2 className="font-semibold">{t.properties}</h2>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full">
-            
-            {/* RESOLUTION */}
             <div className="space-y-2">
               <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
               <div className="flex items-center gap-2">
@@ -277,7 +285,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* TEXT GROUPS */}
             {image && (
               <div className={`space-y-3 pt-4 border-t ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
                 <div className="flex items-center justify-between">
@@ -325,7 +332,10 @@ export default function Home() {
                           <div className="space-y-1.5">
                             {group.lines.map((line) => (
                               <div key={line.id} className={`group relative rounded-md p-2 border transition-colors ${isDark ? 'bg-zinc-950 border-zinc-800 focus-within:border-indigo-500/50' : 'bg-white border-gray-300 focus-within:border-indigo-500'}`}>
-                                <div className="flex gap-2">
+                                <div className="absolute -top-2 left-2 px-1 text-[9px] font-bold uppercase tracking-wider rounded bg-zinc-900 text-zinc-400">
+                                  {getLineLabel(line.type)}
+                                </div>
+                                <div className="flex gap-2 mt-1">
                                   <textarea
                                     value={line.text}
                                     onChange={(e) => updateLine(group.id, line.id, "text", e.target.value)}
@@ -339,7 +349,7 @@ export default function Home() {
                                 </div>
                                 <div className="flex items-center gap-2 mt-1">
                                   <div className="w-4 h-4 rounded-sm overflow-hidden relative border border-zinc-400/20">
-                                    <input type="color" value={line.customColor || (line.type === 'chat' ? "#ffffff" : "#c2a2da")} onChange={(e) => updateLine(group.id, line.id, "customColor", e.target.value)} className="absolute -top-2 -left-2 w-8 h-8 cursor-pointer" />
+                                    <input type="color" value={line.customColor || getDefaultColor(line.type)} onChange={(e) => updateLine(group.id, line.id, "customColor", e.target.value)} className="absolute -top-2 -left-2 w-8 h-8 cursor-pointer" />
                                   </div>
                                   {line.customColor !== "" && (
                                     <button onClick={() => updateLine(group.id, line.id, "customColor", "")} className="text-[10px] text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
@@ -351,15 +361,25 @@ export default function Home() {
                             ))}
                           </div>
 
-                          <div className="flex gap-1.5 pt-1">
-                            <button onClick={() => addLineToGroup(group.id, 'chat')} className={`flex-1 py-1.5 rounded-md text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <MessageSquare size={12} /> {t.normal}
+                          {/* Tombol preset yang baru disusun dalam bentuk grid */}
+                          <div className="grid grid-cols-3 gap-1.5 pt-1">
+                            <button onClick={() => addLineToGroup(group.id, 'chat')} className={`py-1.5 rounded-md text-[10px] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <MessageSquare size={10} /> {t.normal}
                             </button>
-                            <button onClick={() => addLineToGroup(group.id, 'me')} className={`flex-1 py-1.5 rounded-md text-[11px] text-[#c2a2da] font-medium flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <User size={12} /> /me
+                            <button onClick={() => addLineToGroup(group.id, 'me')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <User size={10} /> /me
                             </button>
-                            <button onClick={() => addLineToGroup(group.id, 'do')} className={`flex-1 py-1.5 rounded-md text-[11px] text-[#c2a2da] font-medium flex items-center justify-center gap-1.5 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                              <Globe size={12} /> /do
+                            <button onClick={() => addLineToGroup(group.id, 'do')} className={`py-1.5 rounded-md text-[10px] text-[#c2a2da] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <Globe size={10} /> /do
+                            </button>
+                            <button onClick={() => addLineToGroup(group.id, 'ooc')} className={`py-1.5 rounded-md text-[10px] text-[#b9c9bf] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <MessageCircle size={10} /> OOC
+                            </button>
+                            <button onClick={() => addLineToGroup(group.id, 'radio')} className={`py-1.5 rounded-md text-[10px] text-[#33aa33] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <Radio size={10} /> Radio
+                            </button>
+                            <button onClick={() => addLineToGroup(group.id, 'low')} className={`py-1.5 rounded-md text-[10px] text-zinc-300 font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                              <Volume1 size={10} /> Low
                             </button>
                           </div>
                         </div>
