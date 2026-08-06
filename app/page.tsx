@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Draggable from "react-draggable";
 import { toPng } from "html-to-image";
-import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1 } from "lucide-react";
+import { Upload, Plus, Trash2, Download, RefreshCcw, MessageSquare, User, Globe, Image as ImageIcon, Settings, Type, Layout, Moon, Sun, Languages, MessageCircle, Radio, Volume1, Move, ZoomIn, Crop } from "lucide-react";
 
-// Tipe baris diperbarui dengan tambahan ooc, radio, dan low
 type LineType = 'chat' | 'me' | 'do' | 'ooc' | 'radio' | 'low';
 
 type ChatLine = {
@@ -23,7 +22,7 @@ type TextGroup = {
   y: number; 
 };
 
-// --- KAMUS BAHASA (DICTIONARY) ---
+// --- KAMUS BAHASA ---
 const dict = {
   id: {
     title: "SSRP Studio",
@@ -32,7 +31,9 @@ const dict = {
     startDesc: "Unggah screenshot dari dalam game untuk mulai meracik roleplay. Gambar diproses sepenuhnya di browser.",
     chooseImage: "Pilih Gambar",
     properties: "Pengaturan",
-    canvasSize: "Ukuran Kanvas",
+    canvasSize: "Ukuran Kanvas (Crop)",
+    bgAdjust: "Penyesuaian Latar",
+    scale: "Skala",
     textLayers: "Lapisan Teks",
     addLayer: "Tambah Layer",
     emptyLayer: "Belum ada percakapan",
@@ -40,6 +41,8 @@ const dict = {
     fontSize: "Ukuran Font",
     normal: "Biasa",
     reset: "Reset",
+    resetProject: "Reset Proyek",
+    confirmReset: "Apakah Anda yakin ingin mereset seluruh kanvas? Draft yang tersimpan juga akan dihapus.",
     builtBy: "Dibuat oleh",
     typeHere: "Ketik chat/RP di sini..."
   },
@@ -50,7 +53,9 @@ const dict = {
     startDesc: "Upload an in-game screenshot to start crafting your roleplay. Processed entirely in your browser.",
     chooseImage: "Choose Image",
     properties: "Properties",
-    canvasSize: "Canvas Size",
+    canvasSize: "Canvas Size (Crop)",
+    bgAdjust: "Background Adjust",
+    scale: "Scale",
     textLayers: "Text Layers",
     addLayer: "Add Layer",
     emptyLayer: "No conversations yet",
@@ -58,20 +63,21 @@ const dict = {
     fontSize: "Font Size",
     normal: "Normal",
     reset: "Reset",
+    resetProject: "Reset Project",
+    confirmReset: "Are you sure you want to clear the canvas? Saved drafts will also be deleted.",
     builtBy: "Built by",
     typeHere: "Type chat/RP here..."
   }
 };
 
-// Fungsi bantuan untuk mendapatkan warna default sesuai konteks roleplay SAMP
 const getDefaultColor = (type: LineType) => {
   switch(type) {
     case 'chat': return '#ffffff';
-    case 'me': return '#c2a2da'; // Ungu RP
-    case 'do': return '#c2a2da'; // Ungu RP
-    case 'ooc': return '#b9c9bf'; // Putih keabu-abuan khas OOC
-    case 'radio': return '#33aa33'; // Hijau Faction (bisa diganti misal #8D8DFF untuk PD)
-    case 'low': return '#c8c8c8';
+    case 'me': return '#c2a2da'; 
+    case 'do': return '#c2a2da'; 
+    case 'ooc': return '#b9c9bf'; 
+    case 'radio': return '#33aa33'; 
+    case 'low': return '#c8c8c8'; 
     default: return '#ffffff';
   }
 };
@@ -82,11 +88,9 @@ const DraggableText = ({ group, onDrag }: { group: TextGroup; onDrag: (id: strin
 
   return (
     <Draggable nodeRef={nodeRef} bounds="parent" position={{ x: group.x, y: group.y }} onDrag={(e, data) => onDrag(group.id, data.x, data.y)}>
-      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform hover:scale-[1.01] active:scale-100" style={{ fontSize: `${group.fontSize}px` }}>
+      <div ref={nodeRef} className="absolute cursor-move w-max transition-transform hover:scale-[1.01] active:scale-100" style={{ fontSize: `${group.fontSize}px`, zIndex: 50 }}>
         {group.lines.map((line) => {
-          const defaultColor = getDefaultColor(line.type);
-          const finalColor = line.customColor !== "" ? line.customColor : defaultColor;
-
+          const finalColor = line.customColor !== "" ? line.customColor : getDefaultColor(line.type);
           return (
             <div
               key={line.id}
@@ -108,33 +112,154 @@ const DraggableText = ({ group, onDrag }: { group: TextGroup; onDrag: (id: strin
   );
 };
 
+const SAVE_KEY = "ssrp_studio_draft";
+
 export default function Home() {
+  const [isMounted, setIsMounted] = useState(false);
   const [image, setImage] = useState<string | null>(null);
   const [textGroups, setTextGroups] = useState<TextGroup[]>([]);
+  
+  // State Dimensi & Latar
   const [canvasWidth, setCanvasWidth] = useState<number>(1280);
   const [canvasHeight, setCanvasHeight] = useState<number>(720);
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const [bgScale, setBgScale] = useState<number>(1);
+  const [bgX, setBgX] = useState<number>(0);
+  const [bgY, setBgY] = useState<number>(0);
 
+  // --- LOGIKA KUSTOM VISUAL CROP / RESIZE ---
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
+
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [isDark, setIsDark] = useState<boolean>(true);
   const [lang, setLang] = useState<'id' | 'en'>('id');
   const t = dict[lang];
 
+  // Inisialisasi Event Listener untuk Dragging Canvas (Crop)
+  useEffect(() => {
+    const handleResizeMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const deltaX = e.clientX - resizeStart.x;
+      const deltaY = e.clientY - resizeStart.y;
+      
+      // Mencegah kanvas menjadi terlalu kecil (minimum 200x200 piksel)
+      setCanvasWidth(Math.round(Math.max(200, resizeStart.w + deltaX)));
+      setCanvasHeight(Math.round(Math.max(200, resizeStart.h + deltaY)));
+    };
+    
+    const handleResizeUp = () => setIsResizing(false);
+
+    if (isResizing) {
+      // Mencegah block text selection saat melakukan dragging
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', handleResizeMove);
+      window.addEventListener('mouseup', handleResizeUp);
+    } else {
+      document.body.style.userSelect = 'auto';
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', handleResizeMove);
+      window.removeEventListener('mouseup', handleResizeUp);
+    };
+  }, [isResizing, resizeStart]);
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    setResizeStart({ x: e.clientX, y: e.clientY, w: canvasWidth, h: canvasHeight });
+  };
+
+  // --- AUTO-SAVE HYDRATION ---
+  useEffect(() => {
+    const saved = localStorage.getItem(SAVE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.image || (parsed.textGroups && parsed.textGroups.length > 0)) {
+          if (parsed.image) setImage(parsed.image);
+          if (parsed.textGroups) setTextGroups(parsed.textGroups);
+          if (parsed.canvasWidth) setCanvasWidth(parsed.canvasWidth);
+          if (parsed.canvasHeight) setCanvasHeight(parsed.canvasHeight);
+          if (parsed.bgScale) setBgScale(parsed.bgScale);
+          if (parsed.bgX) setBgX(parsed.bgX);
+          if (parsed.bgY) setBgY(parsed.bgY);
+        }
+      } catch (e) {
+        console.error("Gagal membaca draft SSRP", e);
+      }
+    }
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const draft = { image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY };
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(draft));
+    } catch (e) {
+      console.warn("Storage quota exceeded. Menyimpan relasi teks dan koordinat tanpa objek image.");
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify({ ...draft, image: null }));
+      } catch (err) {
+        console.error("Gagal total menyimpan persistensi status", err);
+      }
+    }
+  }, [image, textGroups, canvasWidth, canvasHeight, bgScale, bgX, bgY, isMounted]);
+
+  const handleResetProject = () => {
+    if (confirm(t.confirmReset)) {
+      setImage(null);
+      setTextGroups([]);
+      setCanvasWidth(1280);
+      setCanvasHeight(720);
+      setBgScale(1);
+      setBgX(0);
+      setBgY(0);
+      localStorage.removeItem(SAVE_KEY);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setImage(URL.createObjectURL(file));
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setImage(base64);
+
+        const img = new window.Image();
+        img.onload = () => {
+          setCanvasWidth(img.naturalWidth);
+          setCanvasHeight(img.naturalHeight);
+          setBgScale(1);
+          setBgX(0);
+          setBgY(0);
+        };
+        img.src = base64;
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleExport = useCallback(async () => {
     if (canvasRef.current === null) return;
     try {
+      // Sembunyikan handle crop sementara saat mengekspor gambar
+      const handleElement = document.getElementById('crop-handle');
+      if (handleElement) handleElement.style.display = 'none';
+
       const dataUrl = await toPng(canvasRef.current, { cacheBust: true, quality: 1.0 });
+      
+      if (handleElement) handleElement.style.display = 'flex';
+
       const link = document.createElement('a');
-      link.download = `SSRP_${Date.now()}.png`;
+      link.download = `SSRP_Studio_${Date.now()}.png`;
       link.href = dataUrl;
       link.click();
     } catch (err) {
-      console.error("Gagal mengekspor gambar:", err);
-      alert("Terjadi kesalahan saat mengekspor gambar.");
+      console.error("Kesalahan kompilasi rasterisasi", err);
+      alert("Terjadi kesalahan sistem saat kompilasi gambar.");
     }
   }, [canvasRef]);
 
@@ -175,6 +300,8 @@ export default function Home() {
   const removeLine = (groupId: string, lineId: string) => {
     setTextGroups(textGroups.map(group => group.id === groupId ? { ...group, lines: group.lines.filter(line => line.id !== lineId) } : group));
   };
+
+  if (!isMounted) return null;
 
   const themeClasses = isDark ? "bg-zinc-950 text-zinc-200 border-zinc-800" : "bg-gray-50 text-zinc-800 border-gray-200";
   const panelClasses = isDark ? "bg-zinc-950 border-zinc-800" : "bg-white border-gray-200";
@@ -218,6 +345,14 @@ export default function Home() {
         </div>
         
         <div className="flex items-center gap-4">
+          {image && (
+            <button onClick={handleResetProject} className={`text-xs font-medium flex items-center gap-1.5 px-3 py-2 rounded-md transition-colors ${isDark ? 'text-red-400 hover:bg-red-500/10' : 'text-red-500 hover:bg-red-50'}`}>
+              <Trash2 size={14} /> <span className="hidden sm:inline">{t.resetProject}</span>
+            </button>
+          )}
+
+          <div className="h-6 w-px bg-zinc-500/30 mx-2 hidden sm:block"></div>
+
           <a href="https://github.com/RobbyDarmawann" target="_blank" rel="noreferrer" className={`text-sm font-medium flex items-center gap-2 hover:text-indigo-500 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.02c3.14-.35 6.5-1.4 6.5-7a4.6 4.6 0 0 0-1.39-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.35-3.5 1.25a11.39 11.39 0 0 0-6.2 0C6.5 2.8 5.4 3.15 5.4 3.15a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.2c0 5.6 3.36 6.65 6.5 7a4.8 4.8 0 0 0-1 3.03V22"></path>
@@ -227,7 +362,7 @@ export default function Home() {
           </a>
           
           {image && (
-            <button onClick={handleExport} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors shadow-lg shadow-indigo-500/20 active:scale-95">
+            <button onClick={handleExport} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors shadow-lg shadow-indigo-500/20 active:scale-95 ml-2">
               <Download size={16} /> {t.exportBtn}
             </button>
           )}
@@ -254,11 +389,40 @@ export default function Home() {
             </div>
           ) : (
             <div className="min-h-full min-w-full flex items-center justify-center p-8">
-              <div ref={canvasRef} className="relative shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden bg-black transition-all duration-300 ring-1 ring-black/10" style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}>
-                <img src={image} alt="SSRP Background" className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+              <div 
+                ref={canvasRef} 
+                className={`relative shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden bg-black ring-1 ${isResizing ? 'ring-indigo-500 ring-2' : 'ring-black/10'}`} 
+                style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}
+              >
+                {/* Latar Belakang Gambar yang bisa dimanipulasi */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <img 
+                    src={image} 
+                    alt="SSRP Background" 
+                    className="object-none max-w-none"
+                    style={{ 
+                      transform: `translate(${bgX}px, ${bgY}px) scale(${bgScale})`,
+                      transition: isResizing ? 'none' : 'transform 0.1s ease-out'
+                    }} 
+                  />
+                </div>
+
+                {/* Layer Teks */}
                 {textGroups.map((group) => (
                   <DraggableText key={group.id} group={group} onDrag={handleDrag} />
                 ))}
+
+                {/* Handle Crop / Resize Kustom */}
+                <div 
+                  id="crop-handle"
+                  onMouseDown={handleResizeMouseDown}
+                  className="absolute bottom-0 right-0 w-8 h-8 cursor-se-resize flex items-end justify-end z-[100] group"
+                  title="Tarik untuk memotong (Crop) kanvas"
+                >
+                  <div className="w-4 h-4 bg-indigo-500/80 group-hover:bg-indigo-500 rounded-tl-lg flex items-center justify-center shadow-lg transition-colors border-t border-l border-white/20">
+                    <Crop size={10} className="text-white" />
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -271,18 +435,48 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-500/50 [&::-webkit-scrollbar-thumb]:rounded-full">
-            <div className="space-y-2">
-              <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">W</span>
-                  <input type="number" value={canvasWidth} onChange={(e) => setCanvasWidth(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
-                </div>
-                <div className="flex-1 relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">H</span>
-                  <input type="number" value={canvasHeight} onChange={(e) => setCanvasHeight(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
+            
+            <div className="space-y-4">
+              {/* RESOLUTION KANVAS */}
+              <div className="space-y-2">
+                <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.canvasSize}</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">W</span>
+                    <input type="number" value={canvasWidth} onChange={(e) => setCanvasWidth(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
+                  </div>
+                  <div className="flex-1 relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">H</span>
+                    <input type="number" value={canvasHeight} onChange={(e) => setCanvasHeight(Number(e.target.value))} className={`w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none transition-all border ${inputClasses}`} />
+                  </div>
                 </div>
               </div>
+
+              {/* BACKGROUND ADJUSTMENTS */}
+              {image && (
+                <div className={`space-y-3 pt-4 border-t ${isDark ? 'border-zinc-800' : 'border-gray-200'}`}>
+                  <label className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>{t.bgAdjust}</label>
+                  
+                  <div className="flex items-center gap-3">
+                    <ZoomIn size={14} className="text-zinc-500" />
+                    <input type="range" min="0.1" max="3" step="0.05" value={bgScale} onChange={(e) => setBgScale(Number(e.target.value))} className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                    <span className="text-[10px] text-zinc-400 w-6 font-medium">{bgScale.toFixed(1)}x</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
+                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">X</span>
+                      <input type="number" value={bgX} onChange={(e) => setBgX(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+                    </div>
+                    <div className="flex-1 relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium"><Move size={12}/></span>
+                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">Y</span>
+                      <input type="number" value={bgY} onChange={(e) => setBgY(Number(e.target.value))} className={`w-full rounded-md pl-12 pr-3 py-1.5 text-sm outline-none transition-all border ${inputClasses}`} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {image && (
@@ -361,7 +555,6 @@ export default function Home() {
                             ))}
                           </div>
 
-                          {/* Tombol preset yang baru disusun dalam bentuk grid */}
                           <div className="grid grid-cols-3 gap-1.5 pt-1">
                             <button onClick={() => addLineToGroup(group.id, 'chat')} className={`py-1.5 rounded-md text-[10px] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
                               <MessageSquare size={10} /> {t.normal}
@@ -378,7 +571,7 @@ export default function Home() {
                             <button onClick={() => addLineToGroup(group.id, 'radio')} className={`py-1.5 rounded-md text-[10px] text-[#33aa33] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
                               <Radio size={10} /> Radio
                             </button>
-                            <button onClick={() => addLineToGroup(group.id, 'low')} className={`py-1.5 rounded-md text-[10px] text-zinc-300 font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                            <button onClick={() => addLineToGroup(group.id, 'low')} className={`py-1.5 rounded-md text-[10px] text-[#c8c8c8] font-medium flex items-center justify-center gap-1 transition-colors ${isDark ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
                               <Volume1 size={10} /> Low
                             </button>
                           </div>
