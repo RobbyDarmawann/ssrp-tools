@@ -71,7 +71,7 @@ const getDefaultColor = (type: LineType) => {
     case 'do': return '#c2a2da'; // Ungu RP
     case 'ooc': return '#b9c9bf'; // Putih keabu-abuan khas OOC
     case 'radio': return '#33aa33'; // Hijau Faction (bisa diganti misal #8D8DFF untuk PD)
-    case 'low': return '#ffffff'; // Putih (biasanya sama dengan chat, hanya beda prefix)
+    case 'low': return '#c8c8c8';
     default: return '#ffffff';
   }
 };
